@@ -1,0 +1,452 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "b6ead8cd951552be8ea8ea58ac5d995d",
+    "entities": [
+      {
+        "tableName": "offers",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `detectedAt` TEXT NOT NULL, `offeredAmountMinor` INTEGER NOT NULL, `currencyCode` TEXT NOT NULL, `estimatedDistanceKm` TEXT, `estimatedDurationSeconds` INTEGER, `pickupName` TEXT, `pickupAddress` TEXT, `dropoffAddress` TEXT, `rawText` TEXT NOT NULL, `status` TEXT NOT NULL, `parserVersion` TEXT NOT NULL, `captureMethod` TEXT NOT NULL, `confidence` REAL, `sessionId` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`sessionId`) REFERENCES `driver_sessions`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "value.id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.detectedAt",
+            "columnName": "detectedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.offeredAmountMinor",
+            "columnName": "offeredAmountMinor",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.currencyCode",
+            "columnName": "currencyCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.estimatedDistanceKm",
+            "columnName": "estimatedDistanceKm",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.estimatedDurationSeconds",
+            "columnName": "estimatedDurationSeconds",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "value.pickupName",
+            "columnName": "pickupName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.pickupAddress",
+            "columnName": "pickupAddress",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.dropoffAddress",
+            "columnName": "dropoffAddress",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.rawText",
+            "columnName": "rawText",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.parserVersion",
+            "columnName": "parserVersion",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.captureMethod",
+            "columnName": "captureMethod",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.confidence",
+            "columnName": "confidence",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "value.sessionId",
+            "columnName": "sessionId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_offers_sessionId",
+            "unique": false,
+            "columnNames": [
+              "sessionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_offers_sessionId` ON `${TABLE_NAME}` (`sessionId`)"
+          },
+          {
+            "name": "index_offers_detectedAt",
+            "unique": false,
+            "columnNames": [
+              "detectedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_offers_detectedAt` ON `${TABLE_NAME}` (`detectedAt`)"
+          },
+          {
+            "name": "index_offers_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_offers_status` ON `${TABLE_NAME}` (`status`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "driver_sessions",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "sessionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "trips",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `offerId` TEXT, `acceptedAt` TEXT, `startedAt` TEXT, `completedAt` TEXT, `estimatedDurationSeconds` INTEGER, `actualDurationSeconds` INTEGER, `estimatedDistanceKm` TEXT, `actualDistanceKm` TEXT, `earningsMinor` INTEGER, `tipMinor` INTEGER, `cashCollectedMinor` INTEGER, `currencyCode` TEXT NOT NULL, `pickupName` TEXT, `pickupAddress` TEXT, `dropoffAddress` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`offerId`) REFERENCES `offers`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "value.id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.offerId",
+            "columnName": "offerId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.acceptedAt",
+            "columnName": "acceptedAt",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.startedAt",
+            "columnName": "startedAt",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.completedAt",
+            "columnName": "completedAt",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.estimatedDurationSeconds",
+            "columnName": "estimatedDurationSeconds",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "value.actualDurationSeconds",
+            "columnName": "actualDurationSeconds",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "value.estimatedDistanceKm",
+            "columnName": "estimatedDistanceKm",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.actualDistanceKm",
+            "columnName": "actualDistanceKm",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.earningsMinor",
+            "columnName": "earningsMinor",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "value.tipMinor",
+            "columnName": "tipMinor",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "value.cashCollectedMinor",
+            "columnName": "cashCollectedMinor",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "value.currencyCode",
+            "columnName": "currencyCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.pickupName",
+            "columnName": "pickupName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.pickupAddress",
+            "columnName": "pickupAddress",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.dropoffAddress",
+            "columnName": "dropoffAddress",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_trips_offerId",
+            "unique": true,
+            "columnNames": [
+              "offerId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_trips_offerId` ON `${TABLE_NAME}` (`offerId`)"
+          },
+          {
+            "name": "index_trips_completedAt",
+            "unique": false,
+            "columnNames": [
+              "completedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_trips_completedAt` ON `${TABLE_NAME}` (`completedAt`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "offers",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "offerId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "driver_sessions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `connectedAt` TEXT NOT NULL, `disconnectedAt` TEXT, `startingZone` TEXT, `endingZone` TEXT, `offersReceived` INTEGER NOT NULL, `offersAccepted` INTEGER NOT NULL, `earningsMinor` INTEGER NOT NULL, `currencyCode` TEXT NOT NULL, `distanceKm` TEXT NOT NULL, `onlineSeconds` INTEGER NOT NULL, `activeSeconds` INTEGER NOT NULL, `idleSeconds` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "value.id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.connectedAt",
+            "columnName": "connectedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.disconnectedAt",
+            "columnName": "disconnectedAt",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.startingZone",
+            "columnName": "startingZone",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.endingZone",
+            "columnName": "endingZone",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.offersReceived",
+            "columnName": "offersReceived",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.offersAccepted",
+            "columnName": "offersAccepted",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.earningsMinor",
+            "columnName": "earningsMinor",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.currencyCode",
+            "columnName": "currencyCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.distanceKm",
+            "columnName": "distanceKm",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.onlineSeconds",
+            "columnName": "onlineSeconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.activeSeconds",
+            "columnName": "activeSeconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.idleSeconds",
+            "columnName": "idleSeconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_driver_sessions_connectedAt",
+            "unique": false,
+            "columnNames": [
+              "connectedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_driver_sessions_connectedAt` ON `${TABLE_NAME}` (`connectedAt`)"
+          }
+        ]
+      },
+      {
+        "tableName": "vehicle_profiles",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `currencyCode` TEXT NOT NULL, `fuelPriceMinorPerLiter` TEXT NOT NULL, `fuelEfficiencyKmPerLiter` TEXT NOT NULL, `maintenanceMinorPerKm` TEXT NOT NULL, `depreciationMinorPerKm` TEXT NOT NULL, `targetNetHourlyMinor` INTEGER NOT NULL, `targetNetPerKmMinor` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "value.id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.currencyCode",
+            "columnName": "currencyCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.fuelPriceMinorPerLiter",
+            "columnName": "fuelPriceMinorPerLiter",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.fuelEfficiencyKmPerLiter",
+            "columnName": "fuelEfficiencyKmPerLiter",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.maintenanceMinorPerKm",
+            "columnName": "maintenanceMinorPerKm",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.depreciationMinorPerKm",
+            "columnName": "depreciationMinorPerKm",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.targetNetHourlyMinor",
+            "columnName": "targetNetHourlyMinor",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.targetNetPerKmMinor",
+            "columnName": "targetNetPerKmMinor",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_vehicle_profiles_name",
+            "unique": false,
+            "columnNames": [
+              "name"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_vehicle_profiles_name` ON `${TABLE_NAME}` (`name`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'b6ead8cd951552be8ea8ea58ac5d995d')"
+    ]
+  }
+}

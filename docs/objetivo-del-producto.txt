@@ -1,0 +1,827 @@
+Objetivo del producto
+
+La aplicación tendrá finalmente dos grandes módulos:
+
+Módulo	Función
+Fase 1 — Analizador de viajes	Construir el historial y analizar cada nueva oferta de Uber en segundos
+Fase 2 — Inteligencia de zonas y horarios	Dashboard, predicción de demanda y recomendaciones de cuándo/dónde conectarse
+
+No empezaremos la Fase 2 hasta que la captura de datos de la Fase 1 sea fiable. El dashboard dependerá de esos datos.
+
+FASE 1 — Analizador de Uber
+
+El objetivo funcional de esta fase es que ocurra esto:
+
+Uber muestra una oferta
+        ↓
+Nuestra app la detecta
+        ↓
+Extrae:
+• pago
+• distancia
+• tiempo
+• comercio
+• origen
+• destino
+• hora
+        ↓
+Consulta tu historial
+        ↓
+Calcula rentabilidad
+        ↓
+En 1–2 segundos:
+🟢 CONVIENE
+🟡 DUDOSO
+🔴 NO CONVIENE
+        ↓
+Guarda la oferta aunque la rechaces
+        ↓
+Si se realiza:
+guarda el resultado real + propina + tiempo
+
+La aplicación no aceptará ni rechazará pedidos automáticamente. Su función será análisis y recomendación; la decisión seguirá siendo tuya.
+
+1. Arquitectura Android
+
+Propongo trabajar con:
+
+Kotlin + Jetpack Compose
+
+y esta estructura lógica:
+
+app/
+│
+├── core/
+│   ├── database/
+│   ├── model/
+│   ├── permissions/
+│   └── utils/
+│
+├── uber/
+│   ├── accessibility/
+│   ├── parser/
+│   ├── detector/
+│   └── capture/
+│
+├── history/
+│   ├── importer/
+│   ├── repository/
+│   └── ui/
+│
+├── analyzer/
+│   ├── scoring/
+│   ├── cost/
+│   ├── destination/
+│   └── recommendation/
+│
+├── overlay/
+│   ├── service/
+│   └── ui/
+│
+├── settings/
+│
+└── diagnostics/
+
+Esto es importante: la lógica para leer Uber estará separada de la lógica económica. Si Uber cambia una pantalla en seis meses, modificamos el parser sin tocar todo el motor de análisis.
+
+2. Captura histórica
+
+Esta es la primera funcionalidad que debemos terminar.
+
+Necesitamos transformar pantallas como las que me mostraste en registros estructurados.
+
+La primera versión permitirá seleccionar varias capturas del historial de Uber y procesarlas automáticamente.
+
+Por cada viaje buscaremos:
+
+Campo	Ejemplo
+Fecha	15/09/2026
+Hora	11:29 p. m.
+Ganancia	$54.50
+Duración	29 min 11 seg
+Distancia	10.04 km
+Comercio	Taquería Los Sentados
+Destino	13 de Mayo, Puebla
+Propina	$14.74
+Tipo	Delivery
+Efectivo recibido	$0 / $169 / etc.
+
+Aquí hay una regla fundamental:
+
+“Efectivo recibido” NO se sumará como ganancia.
+
+Lo guardaremos en un campo independiente:
+
+earnings = 54.50
+tip = 14.74
+cashCollected = 169.00
+
+Eso evitará distorsionar todos nuestros cálculos.
+
+OCR
+
+Para capturas utilizaremos reconocimiento de texto local, idealmente ML Kit.
+
+Después:
+
+Imagen
+ ↓
+OCR
+ ↓
+Texto
+ ↓
+UberEarningsHistoryParser
+ ↓
+TripCandidate
+ ↓
+Validación
+ ↓
+Base de datos
+
+Cuando la confianza sea baja, se mostrará una pantalla sencilla para corregir los datos antes de guardarlos.
+
+3. Base de datos
+
+Usaremos Room sobre SQLite.
+
+Desde el principio debemos diseñarla pensando en el dashboard futuro.
+
+Offer
+
+Registra cada pedido recibido, incluyendo rechazados.
+
+id
+detectedAt
+
+offeredAmount
+estimatedDistanceKm
+estimatedDurationSeconds
+
+pickupName
+pickupAddress
+dropoffAddress
+
+rawText
+
+status
+
+parserVersion
+captureMethod
+confidence
+
+Estados posibles:
+
+DETECTED
+ANALYZED
+ACCEPTED
+REJECTED
+EXPIRED
+UNKNOWN
+Trip
+
+Existe cuando una oferta terminó convirtiéndose en viaje.
+
+id
+offerId
+
+acceptedAt
+startedAt
+completedAt
+
+estimatedDuration
+actualDuration
+
+estimatedDistance
+actualDistance
+
+earnings
+tip
+cashCollected
+
+pickupName
+pickupAddress
+dropoffAddress
+DriverSession
+
+Esta tabla será extremadamente importante para la Fase 2.
+
+sessionId
+
+connectedAt
+disconnectedAt
+
+startingZone
+endingZone
+
+offersReceived
+offersAccepted
+
+earnings
+distance
+onlineMinutes
+activeMinutes
+idleMinutes
+
+Sin esta tabla sería imposible saber correctamente cuáles son las mejores horas.
+
+VehicleProfile
+fuelPrice
+fuelEfficiencyKmPerLiter
+
+maintenanceCostPerKm
+depreciationCostPerKm
+
+targetNetHourly
+targetNetPerKm
+
+De esta forma calcularemos rentabilidad real.
+
+4. Captura automática de nuevas ofertas
+
+Será la segunda gran pieza.
+
+Primero intentaremos obtener la información mediante un:
+
+Android AccessibilityService
+
+Cuando Uber muestre una oferta:
+
+AccessibilityEvent
+        ↓
+Verificar que pertenece a Uber
+        ↓
+Extraer nodos de texto
+        ↓
+UberIncomingOfferParser
+        ↓
+Offer
+
+Por ejemplo, podríamos recibir internamente algo como:
+
+$83.40
+
+32 min
+8.7 km
+
+McDonald's
+Av. Juárez
+
+San Manuel
+
+y convertirlo inmediatamente en:
+
+amount = 83.40
+duration = 32
+distance = 8.7
+pickup = McDonald's
+destination = San Manuel
+
+Esto será considerablemente más rápido que OCR.
+
+5. Sistema de respaldo
+
+No debemos depender completamente del árbol de accesibilidad de Uber.
+
+Tendremos dos mecanismos:
+
+Método A
+AccessibilityService
+    ↓
+rápido
+    ↓
+preferido
+
+
+Método B
+Captura autorizada + OCR
+    ↓
+más lento
+    ↓
+respaldo
+
+Así la aplicación será mucho más resistente ante cambios de Uber.
+
+No vamos a interceptar tráfico de Uber ni utilizar APIs privadas.
+
+6. Protección contra ofertas duplicadas
+
+Uber puede redibujar la pantalla varias veces.
+
+Sin protección podríamos registrar:
+
+$84 — 7 km
+$84 — 7 km
+$84 — 7 km
+
+como tres pedidos distintos.
+
+Generaremos una huella de cada oferta:
+
+hash(
+    amount +
+    distance +
+    duration +
+    pickup +
+    destination
+)
+
+y aplicaremos además una ventana temporal.
+
+Por ejemplo:
+
+misma huella
++
+menos de 30 segundos
+=
+misma oferta
+
+Este componente debe estar terminado antes de comenzar a recopilar datos masivamente.
+
+7. Motor económico
+
+Esta será una librería independiente:
+
+TripAnalyzer
+
+Inicialmente no necesitamos IA.
+
+Una fórmula determinista es más útil porque podremos comprobar exactamente por qué una oferta fue verde o roja.
+
+Pago por hora
+
+Si Uber ofrece:
+
+$90
+40 minutos
+
+entonces:
+
+$$ 90 /(40/60)=135 \text{ pesos/hora} $$
+Pago por km
+
+Si son 9 km:
+
+$$ 90/9=10 \text{ pesos/km} $$
+Combustible
+
+Supongamos:
+
+rendimiento = 12 km/L
+gasolina = $24/L
+
+Entonces:
+
+$$ 24 / 12 = 2 \text{ pesos/km} $$
+
+Un recorrido de 9 km implica aproximadamente:
+
+$$ 9 \times 2 = \$18 $$
+
+solo de combustible.
+
+Después añadiremos mantenimiento y depreciación.
+
+8. El concepto principal: distancia efectiva
+
+No queremos evaluar únicamente:
+
+9 km del pedido
+
+sino:
+
+9 km pedido
++
+4 km reposicionamiento esperado
+=
+13 km reales
+
+Lo mismo con el tiempo.
+
+40 min pedido
++
+12 min esperando siguiente pedido
+=
+52 minutos efectivos
+
+Entonces la oferta anterior ya no sería:
+
+$135/h
+
+sino:
+
+$$ 90/(52/60)=103.85/h $$
+
+Ese será uno de los diferenciadores principales de nuestra app.
+
+Al principio, cuando aún no tengamos historial suficiente, aparecerá:
+
+Destino: información insuficiente
+
+y no inventaremos valores.
+
+9. Motor de decisión
+
+No quiero basarlo solamente en una puntuación artificial.
+
+Primero calcularemos métricas reales:
+
+Pago bruto/h
+Pago/km
+
+Costo combustible
+Costo vehículo
+
+Ganancia neta estimada
+
+Minutos de reposicionamiento
+Km de reposicionamiento
+
+Ganancia neta/h efectiva
+Ganancia neta/km efectivo
+
+Después entra el clasificador.
+
+🟢 Verde
+
+Ejemplo:
+
+$124/h efectivo
+$8.60/km efectivo
+
+Destino históricamente activo
+Poco reposicionamiento
+
+Resultado:
+
+🟢 CONVIENE
+
+🟡 Amarillo
+$97/h
+$6.30/km
+
+Destino sin suficiente historial
+
+Resultado:
+
+🟡 REVISAR
+
+🔴 Rojo
+$69/h
+$4.10/km
+
+Destino con 18 min promedio sin pedidos
+
+Resultado:
+
+🔴 NO CONVIENE
+
+10. Confianza estadística
+
+Será importante desde la primera versión.
+
+No sería correcto mostrar:
+
+“Esta zona tiene 15 minutos de espera”
+
+si solo tenemos dos visitas.
+
+Cada estadística tendrá:
+
+sampleSize
+confidence
+
+Por ejemplo:
+
+San Manuel
+20:00–22:00
+
+27 observaciones
+
+Espera media: 7.4 min
+Confianza: ALTA
+
+pero:
+
+Ocotlán
+20:00–22:00
+
+3 observaciones
+
+Espera media: 16 min
+Confianza: BAJA
+
+Esto prepara muy bien la Fase 2.
+
+11. Interfaz mientras llega una oferta
+
+La interfaz debe ser extremadamente rápida de entender.
+
+Nada de tablas cuando estás manejando.
+
+Podría aparecer una tarjeta flotante:
+
+┌──────────────────────┐
+│     🟢 CONVIENE      │
+│                      │
+│      $127 / h        │
+│      $8.40 / km      │
+│                      │
+│ Destino: favorable   │
+└──────────────────────┘
+
+Al tocarla:
+
+OFERTA
+
+Uber:               $82.50
+Distancia:           7.3 km
+Tiempo:              31 min
+
+Combustible:        -$14.60
+Desgaste:            -$5.10
+
+Reposición:          +1.8 km
+Espera estimada:      6 min
+
+NETO ESTIMADO
+$62.80
+
+$101.80/h efectivos
+
+Eso permite una decisión casi inmediata.
+
+12. Flujo completo de una oferta
+
+Internamente tendremos una máquina de estados:
+
+OFERTA DETECTADA
+       ↓
+PARSEADA
+       ↓
+ANALIZADA
+       ↓
+┌───────────┬───────────┬───────────┐
+│ ACEPTADA  │ RECHAZADA │ EXPIRADA  │
+└───────────┴───────────┴───────────┘
+       ↓
+SI ACEPTADA
+       ↓
+EN CURSO
+       ↓
+COMPLETADA
+       ↓
+PROPINA / AJUSTES
+       ↓
+FINALIZADA
+
+Incluso una oferta rechazada quedará almacenada.
+
+Eso será esencial para saber posteriormente:
+
+“Uber te ofreció 9 pedidos entre 7 y 8 p. m., pero solo aceptaste 3.”
+
+13. Historial dentro de nuestra aplicación
+
+La Fase 1 tendrá ya una pantalla sencilla de historial.
+
+No será todavía el dashboard predictivo.
+
+Algo como:
+
+HOY
+
+19:32  $84.20  7.8 km   🟢
+19:11  $42.50  9.3 km   🔴 rechazado
+18:57  $67.30  4.1 km   🟢
+18:43  $35.10  8.7 km   🔴 rechazado
+
+Al tocar un viaje podremos ver todo el análisis.
+
+Esto nos permitirá detectar errores en la captura antes de usar esos datos para estadísticas.
+
+14. Diagnóstico
+
+Quiero incluir una pantalla que normalmente se omitiría en una aplicación convencional:
+
+Diagnóstico de captura Uber
+
+Mostrará:
+
+Accessibility: OK
+Overlay: OK
+OCR: OK
+Uber detectado: OK
+
+Última oferta:
+20:14:32
+
+Parser:
+UberIncomingOfferParser v1.3
+
+Datos detectados:
+$74.50
+31 min
+8.4 km
+
+Esto va a ahorrar muchísimo tiempo cuando Uber cambie algo de su interfaz.
+
+15. Orden exacto para trabajar con Codex
+
+No conviene pedirle a Codex que construya toda la aplicación de una sola vez. La desarrollaremos por tickets verificables.
+
+Ticket	Trabajo	Resultado
+00	Crear proyecto Android	Proyecto compila
+01	Modelos de dominio	Offer, Trip, Session, Vehicle
+02	Room database	Persistencia funcionando
+03	Repositorios	Lectura/escritura desacoplada
+04	Importador de screenshots	Selección múltiple
+05	OCR	Extraer texto
+06	Parser historial Uber	Convertir texto → Trip
+07	Pantalla de revisión	Corregir OCR
+08	Historial local	Ver viajes guardados
+09	Motor de costos	Combustible/desgaste
+10	TripAnalyzer	$/h, $/km, neto
+11	AccessibilityService	Detectar Uber
+12	Parser de oferta	Crear Offer
+13	Deduplicador	Evitar registros duplicados
+14	Analizador en vivo	Offer → evaluación
+15	Overlay	Verde/amarillo/rojo
+16	Seguimiento estado	aceptado/rechazado/completado
+17	Asociación Offer ↔ Trip	Cerrar ciclo
+18	Propinas/ajustes	Actualizar viaje terminado
+19	Diagnóstico	Inspeccionar errores
+20	Exportación datos	JSON/CSV para respaldo
+21	Pruebas de campo	Uber real
+22	Correcciones	MVP Fase 1 estable
+
+Ese será nuestro roadmap operativo.
+
+16. Pruebas automatizadas
+
+Los parsers tienen que estar fuertemente probados.
+
+Usaremos justamente tipos de ejemplos como los de tus capturas:
+
+$54.50
+Delivery · 29 min 11 seg · 10.04 km
+$14.74 Propinas otorgadas por usuarios
+
+Resultado esperado:
+
+earnings = 54.50
+durationSeconds = 1751
+distanceKm = 10.04
+tip = 14.74
+
+Y:
+
+$54.78
+Delivery · 41 min 42 seg · 8.66 km
+$169.00 Efectivo recibido
+
+debe generar:
+
+earnings = 54.78
+cashCollected = 169
+
+y nunca:
+
+earnings = 223.78
+
+Este tipo de pruebas serán obligatorias antes de pasar al siguiente módulo.
+
+17. Definition of Done de la Fase 1
+
+No consideraría terminada la primera fase hasta que podamos hacer una jornada real de Uber y cumplir todo esto:
+
+Una oferta aparece → la app la detecta → en menos de unos segundos la analiza → muestra recomendación → almacena la oferta → reconoce posteriormente qué ocurrió → almacena el viaje → incorpora propina/resultado final.
+
+Además:
+
+no duplica ofertas;
+no confunde efectivo con ganancias;
+sigue funcionando aunque no exista historial del destino;
+funciona sin conexión a nuestros servidores;
+guarda rechazados;
+guarda viajes completados;
+permite corregir datos;
+muestra cómo obtuvo su recomendación;
+puede exportar la base de datos;
+y Uber Driver continúa funcionando normalmente.
+FASE 2 — Dashboard y predicción
+
+La arquitectura anterior deja preparados todos los datos.
+
+Después construiremos:
+
+Uber Intelligence Dashboard
+
+que analizará:
+
+día de semana
++
+hora
++
+zona
++
+ofertas recibidas
++
+calidad de ofertas
++
+espera
++
+destinos
++
+propinas
++
+viajes vacíos
++
+ganancia neta
+
+para obtener:
+
+Mejor hora para conectarte
+
+Mejor zona para empezar
+
+Probabilidad de recibir pedido
+
+Ganancia esperada/h
+
+Cuándo abandonar una zona
+
+Dónde reposicionarte
+
+Y finalmente las notificaciones que mencionas:
+
+🟢 Buen momento para conectarte
+Históricamente entre 7:00–9:30 p. m. esta zona genera tus mejores resultados.
+
+o:
+
+🟡 Espera
+En esta zona tus resultados suelen mejorar a partir de las 7:15 p. m.
+
+o:
+
+🔵 Reposición recomendada
+Tu zona actual está bajando. Históricamente el corredor Serdán presenta mejores resultados durante los próximos 45 minutos.
+
+Pero no vamos a programar todavía esa lógica. Durante la Fase 1 solamente recopilaremos correctamente los datos necesarios para que esas recomendaciones tengan fundamento estadístico.
+
+Primer bloque que debemos construir
+
+Nuestro primer objetivo en Codex debe ser:
+
+Tickets 00–03: arquitectura + modelos + Room.
+
+Todavía sin OCR, Uber ni overlay.
+
+El primer prompt para Codex puede ser este:
+
+Vamos a construir una aplicación Android en Kotlin con Jetpack Compose
+dedicada exclusivamente al análisis de ofertas y viajes de Uber Driver.
+
+Crea el proyecto base siguiendo Clean Architecture pragmática.
+
+Necesitamos inicialmente:
+
+- modelos de dominio:
+  Offer
+  Trip
+  DriverSession
+  VehicleProfile
+
+- persistencia local utilizando Room
+- repositories para cada entidad
+- timestamps utilizando Instant o equivalente robusto
+- importes monetarios almacenados evitando errores de punto flotante
+- distancias en kilómetros
+- duraciones internamente en segundos
+- enums para estados de Offer
+- migraciones de Room preparadas
+- tests unitarios para la persistencia
+
+No implementar todavía:
+- AccessibilityService
+- OCR
+- overlay
+- dashboard
+- predicción
+- soporte para otras plataformas
+
+La aplicación en esta fase debe compilar y permitir crear, consultar,
+actualizar y eliminar los registros mediante repositories.
+
+Organiza los paquetes para que posteriormente podamos añadir:
+uber/parser
+uber/accessibility
+history/importer
+analyzer
+overlay
+dashboard
+
+Antes de modificar código, inspecciona el proyecto y presenta brevemente
+qué archivos vas a crear o modificar. Después implementa y ejecuta tests.
+
+Ese es el punto correcto para comenzar. Una vez 00–03 compilen y tengan pruebas, avanzamos al importador de las capturas que ya tienes; después al motor económico; y solo entonces conectamos la aplicación en tiempo real con Uber.
