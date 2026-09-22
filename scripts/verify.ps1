@@ -12,10 +12,17 @@ try {
         $env:ANDROID_HOME = Join-Path $projectRoot '.tools/android-sdk'
     }
     $env:GRADLE_USER_HOME = Join-Path $projectRoot '.tools/gradle-home'
+    # Android tooling otherwise falls back to C:\.android in some sandboxed shells.
+    $env:ANDROID_USER_HOME = Join-Path $projectRoot '.tools/android-home'
+    New-Item -ItemType Directory -Path $env:ANDROID_USER_HOME -Force | Out-Null
     # Windows packaged terminals may remap TEMP, breaking Java's local sockets.
     $socketDirectory = Join-Path $projectRoot '.tools/s'
     New-Item -ItemType Directory -Path $socketDirectory -Force | Out-Null
-    $env:JAVA_TOOL_OPTIONS = "$env:JAVA_TOOL_OPTIONS " + '"-Djdk.net.unixdomain.tmpdir=' + $socketDirectory + '"'
+    $javaUserHome = Join-Path $projectRoot '.tools/user-home'
+    New-Item -ItemType Directory -Path $javaUserHome -Force | Out-Null
+    $env:JAVA_TOOL_OPTIONS = "$env:JAVA_TOOL_OPTIONS " +
+        '"-Djdk.net.unixdomain.tmpdir=' + $socketDirectory + '" ' +
+        '"-Duser.home=' + $javaUserHome + '"'
 
     $tasks = @(':app:assembleDebug', ':app:testDebugUnitTest', ':app:lintDebug')
     if ($Release) { $tasks += ':app:assembleRelease' }

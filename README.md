@@ -7,12 +7,16 @@ Dispositivo objetivo: **4 GB de RAM y 64 GB de almacenamiento**. Consultas
 paginadas, índices y optimización release desde el primer bloque. Véase el
 [plan de rendimiento y validación](docs/rendimiento.md).
 
-## Bloque inicial: tickets 00–03
+## Bloques implementados: tickets 00–08
 
-Se incluyen la pantalla inicial, los modelos Offer, Trip, DriverSession y
-VehicleProfile, sus tablas Room y repositorios con crear, consultar, observar,
-actualizar y eliminar. La captura, OCR, análisis económico y overlay corresponden
-a bloques posteriores.
+Se incluyen los modelos Offer, Trip, DriverSession y VehicleProfile, sus tablas
+Room y repositorios con crear, consultar, observar, actualizar y eliminar.
+
+La app permite seleccionar varias capturas del historial, reconocer texto
+localmente con ML Kit, convertirlo en candidatos de viaje, revisar y corregir los
+campos antes de guardarlos, y consultar los viajes en el historial local. El OCR
+no necesita enviar las imágenes a un servidor. El análisis económico, la captura
+en vivo y el overlay corresponden a bloques posteriores.
 
 ## Compilación y pruebas
 
@@ -49,9 +53,10 @@ precisión, orden temporal y conservación de datos al reabrir la base.
 El esquema Room v1 está incluido en Git. Las advertencias de versiones más
 recientes de dependencias quedan como mantenimiento posterior.
 
-La app contiene una pantalla inicial; todavía no importa capturas ni analiza
-Uber en vivo. El rendimiento en un dispositivo real de 4 GB sigue pendiente
-de medición. Una compilación correcta no sustituye esa prueba.
+**Bloque 04–08 validado:** APK debug y release generadas, 20 pruebas aprobadas
+(incluidas tres del parser) y Android Lint sin errores. La app todavía no analiza
+Uber en vivo. El OCR y el rendimiento siguen pendientes de validación en un
+dispositivo real de 4 GB; una compilación correcta no sustituye esa prueba.
 
 GitHub Actions ejecuta las mismas comprobaciones en cada push a `develop`/`main`
 y en cada pull request, conserva los informes y publica la APK de depuración
