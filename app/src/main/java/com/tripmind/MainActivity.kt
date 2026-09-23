@@ -35,7 +35,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.tripmind.analyzer.cost.TripCostCalculator
 import com.tripmind.core.model.Trip
+import com.tripmind.core.model.VehicleProfile
 import com.tripmind.core.repository.TripRepository
 import com.tripmind.history.importer.TripCandidate
 import com.tripmind.history.importer.UberScreenshotOcr
@@ -55,7 +57,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Section { IMPORT, HISTORY }
+private enum class Section { IMPORT, HISTORY, COSTS }
 
 @Composable
 private fun TripMindScreen(repository: TripRepository) {
@@ -100,27 +102,28 @@ private fun TripMindScreen(repository: TripRepository) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SectionButton("Importar", section == Section.IMPORT) { section = Section.IMPORT }
                 SectionButton("Historial", section == Section.HISTORY) { section = Section.HISTORY }
+                SectionButton("Costos", section == Section.COSTS) { section = Section.COSTS }
             }
-            if (section == Section.IMPORT) {
-                ImportSection(
-                    candidates = candidates,
-                    processing = processing,
-                    message = message,
-                    onPick = { picker.launch("image/*") },
-                    onDiscard = { candidates.remove(it) },
-                    onSave = { candidate ->
-                        scope.launch {
-                            runCatching { repository.create(candidate.toTrip()) }
-                                .onSuccess {
-                                    candidates.remove(candidate)
-                                    message = "Viaje guardado en el historial."
-                                }
-                                .onFailure { message = "No se pudo guardar: ${it.message ?: "error desconocido"}" }
-                        }
-                    },
-                )
-            } else {
-                HistorySection(repository)
+            when (section) {
+                Section.IMPORT -> ImportSection(
+                        candidates = candidates,
+                        processing = processing,
+                        message = message,
+                        onPick = { picker.launch("image/*") },
+                        onDiscard = { candidates.remove(it) },
+                        onSave = { candidate ->
+                            scope.launch {
+                                runCatching { repository.create(candidate.toTrip()) }
+                                    .onSuccess {
+                                        candidates.remove(candidate)
+                                        message = "Viaje guardado en el historial."
+                                    }
+                                    .onFailure { message = "No se pudo guardar: ${it.message ?: "error desconocido"}" }
+                            }
+                        },
+                    )
+                Section.HISTORY -> HistorySection(repository)
+                Section.COSTS -> CostSection()
             }
         }
     }
@@ -214,6 +217,69 @@ private fun EditField(label: String, value: String, onChange: (String) -> Unit) 
 }
 
 @Composable
+private fun CostSection() {
+    var gross by remember { mutableStateOf("90.00") }
+    var distance by remember { mutableStateOf("9.0") }
+    var fuelPrice by remember { mutableStateOf("24.00") }
+    var efficiency by remember { mutableStateOf("12.0") }
+    var maintenance by remember { mutableStateOf("0.50") }
+    var depreciation by remember { mutableStateOf("0.30") }
+
+    val calculation = runCatching {
+        val profile = VehicleProfile(
+            name = "Vista preliminar",
+            fuelPriceMinorPerLiter = fuelPrice.requiredDecimal().movePointRight(2),
+            fuelEfficiencyKmPerLiter = efficiency.requiredDecimal(),
+            maintenanceMinorPerKm = maintenance.requiredDecimal().movePointRight(2),
+            depreciationMinorPerKm = depreciation.requiredDecimal().movePointRight(2),
+            targetNetHourlyMinor = 0,
+            targetNetPerKmMinor = BigDecimal.ZERO,
+        )
+        val grossMinor = gross.requiredDecimal().movePointRight(2)
+        require(grossMinor.signum() >= 0) { "Gross earnings cannot be negative" }
+        TripCostCalculator().calculate(distance.requiredDecimal(), profile) to grossMinor
+    }.getOrNull()
+
+    Column(
+        modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("Calculadora de costos", style = MaterialTheme.typography.headlineSmall)
+        Text("Vista preliminar del motor económico. Estos valores todavía no se guardan como perfil del vehículo.")
+        EditField("Pago de la oferta (MXN)", gross) { gross = it }
+        EditField("Distancia del viaje (km)", distance) { distance = it }
+        EditField("Precio de gasolina (MXN/L)", fuelPrice) { fuelPrice = it }
+        EditField("Rendimiento del vehículo (km/L)", efficiency) { efficiency = it }
+        EditField("Mantenimiento (MXN/km)", maintenance) { maintenance = it }
+        EditField("Depreciación (MXN/km)", depreciation) { depreciation = it }
+
+        if (calculation == null) {
+            Text("Revisa los valores: no pueden ser negativos y el rendimiento debe ser mayor que cero.", color = MaterialTheme.colorScheme.error)
+        } else {
+            val (costs, grossMinor) = calculation
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Resultado", style = MaterialTheme.typography.titleLarge)
+                    CostRow("Combustible", costs.fuelCostMinor)
+                    CostRow("Mantenimiento", costs.maintenanceCostMinor)
+                    CostRow("Depreciación", costs.depreciationCostMinor)
+                    CostRow("Costo total", costs.totalCostMinor, bold = true)
+                    CostRow("Neto estimado", costs.netMinor(grossMinor), bold = true)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CostRow(label: String, amountMinor: BigDecimal, bold: Boolean = false) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal)
+        Text(amountMinor.toMxn(), fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal)
+    }
+}
+
+@Composable
 private fun HistorySection(repository: TripRepository) {
     val trips by repository.observePage(limit = 100).collectAsState(initial = emptyList())
     Column(
@@ -253,4 +319,6 @@ private fun String.decimalOrNull(): BigDecimal? = runCatching {
     trim().takeIf(String::isNotEmpty)?.replace(',', '.')?.let(::BigDecimal)
 }.getOrNull()
 private fun String.nullIfBlank(): String? = trim().ifEmpty { null }
+private fun String.requiredDecimal(): BigDecimal = BigDecimal(trim().replace(',', '.'))
+private fun BigDecimal.toMxn(): String = "$" + movePointLeft(2).setScale(2, RoundingMode.HALF_UP).toPlainString() + " MXN"
 private val DATE_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")

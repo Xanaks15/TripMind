@@ -7,7 +7,7 @@ Dispositivo objetivo: **4 GB de RAM y 64 GB de almacenamiento**. Consultas
 paginadas, índices y optimización release desde el primer bloque. Véase el
 [plan de rendimiento y validación](docs/rendimiento.md).
 
-## Bloques implementados: tickets 00–08
+## Bloques implementados: tickets 00–09
 
 Se incluyen los modelos Offer, Trip, DriverSession y VehicleProfile, sus tablas
 Room y repositorios con crear, consultar, observar, actualizar y eliminar.
@@ -15,8 +15,12 @@ Room y repositorios con crear, consultar, observar, actualizar y eliminar.
 La app permite seleccionar varias capturas del historial, reconocer texto
 localmente con ML Kit, convertirlo en candidatos de viaje, revisar y corregir los
 campos antes de guardarlos, y consultar los viajes en el historial local. El OCR
-no necesita enviar las imágenes a un servidor. El análisis económico, la captura
-en vivo y el overlay corresponden a bloques posteriores.
+no necesita enviar las imágenes a un servidor.
+
+El motor de costos calcula combustible, mantenimiento, depreciación, costo total
+y neto estimado con precisión decimal. La pestaña Costos permite probarlo con
+valores editables. La captura en vivo, el análisis completo y el overlay
+corresponden a bloques posteriores.
 
 ## Compilación y pruebas
 
@@ -57,6 +61,9 @@ recientes de dependencias quedan como mantenimiento posterior.
 (incluidas tres del parser) y Android Lint sin errores. La app todavía no analiza
 Uber en vivo. El OCR y el rendimiento siguen pendientes de validación en un
 dispositivo real de 4 GB; una compilación correcta no sustituye esa prueba.
+
+**Ticket 09 validado:** motor de costos y calculadora visual, con 23 pruebas
+aprobadas en total y Android Lint sin errores.
 
 GitHub Actions ejecuta las mismas comprobaciones en cada push a `develop`/`main`
 y en cada pull request, conserva los informes y publica la APK de depuración
