@@ -245,6 +245,7 @@ private fun EditField(label: String, value: String, onChange: (String) -> Unit) 
 private fun LiveSection(container: AppContainer) {
     val context = LocalContext.current
     var settingsRefresh by remember { mutableStateOf(0) }
+    var diagnosticRefresh by remember { mutableStateOf(0) }
     val settingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         settingsRefresh++
     }
@@ -252,6 +253,14 @@ private fun LiveSection(container: AppContainer) {
     val profiles by container.vehicles.observePage(limit = 1).collectAsState(initial = emptyList())
     val vehicle = profiles.firstOrNull() ?: DefaultVehicleProfile.create()
     val enabled = remember(settingsRefresh) { isAccessibilityServiceEnabled(context) }
+    val diagnostics = remember(diagnosticRefresh, offers.size) {
+        val preferences = context.getSharedPreferences(UberAccessibilityService.PREFERENCES, android.content.Context.MODE_PRIVATE)
+        Triple(
+            preferences.getString(UberAccessibilityService.LAST_RESULT, null),
+            preferences.getLong(UberAccessibilityService.LAST_EVENT_AT, 0),
+            preferences.getString(UberAccessibilityService.LAST_RAW_TEXT, null),
+        )
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
@@ -271,6 +280,17 @@ private fun LiveSection(container: AppContainer) {
         Text("Ofertas detectadas", style = MaterialTheme.typography.titleLarge)
         if (offers.isEmpty()) Text("Aún no se han detectado ofertas. Abre Uber Driver después de activar el servicio.")
         offers.forEach { offer -> OfferAnalysisCard(offer, TripAnalyzer().analyze(offer, vehicle)) }
+        Text("Diagnóstico de captura", style = MaterialTheme.typography.titleLarge)
+        OutlinedButton(onClick = { diagnosticRefresh++ }) { Text("Actualizar diagnóstico") }
+        diagnostics.first?.let { Text("Resultado: $it") }
+        if (diagnostics.second > 0) {
+            Text("Último evento: ${DATE_TIME.format(java.time.Instant.ofEpochMilli(diagnostics.second).atZone(ZoneId.systemDefault()))}")
+        }
+        diagnostics.third?.let { raw ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Text(raw.take(1_500), modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+            }
+        }
     }
 }
 

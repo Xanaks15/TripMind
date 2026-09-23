@@ -54,6 +54,7 @@ class UberAccessibilityService : AccessibilityService() {
         val root = rootInActiveWindow ?: return
         val rawText = collectText(root)
         if (rawText.isBlank()) return
+        recordDiagnostic(rawText, "Evento de Uber recibido")
         scope.launch { process(rawText) }
     }
 
@@ -71,10 +72,12 @@ class UberAccessibilityService : AccessibilityService() {
             when (tracker.detect(rawText)) {
                 TripStateSignal.Accepted -> {
                     markAccepted(activeOfferId)
+                    recordDiagnostic(rawText, "Estado aceptado reconocido")
                     return
                 }
                 TripStateSignal.Completed -> {
                     markCompleted(activeOfferId)
+                    recordDiagnostic(rawText, "Estado completado reconocido")
                     return
                 }
                 null -> {
@@ -84,8 +87,14 @@ class UberAccessibilityService : AccessibilityService() {
             }
         }
 
-        val offer = parser.parse(rawText) ?: return
-        if (deduplicator.isDuplicate(offer) || isPersistedDuplicate(offer)) return
+        val offer = parser.parse(rawText) ?: run {
+            recordDiagnostic(rawText, "Texto no reconocido como oferta")
+            return
+        }
+        if (deduplicator.isDuplicate(offer) || isPersistedDuplicate(offer)) {
+            recordDiagnostic(rawText, "Oferta duplicada omitida")
+            return
+        }
 
         activeOfferId?.let { previousId ->
             container.offers.get(previousId)?.takeIf { it.status == OfferStatus.ANALYZED }?.let {
@@ -97,6 +106,7 @@ class UberAccessibilityService : AccessibilityService() {
         val analysis = analyzer.analyze(offer, vehicle)
         container.offers.update(offer.copy(status = OfferStatus.ANALYZED))
         preferences.edit().putString(ACTIVE_OFFER_ID, offer.id).apply()
+        recordDiagnostic(rawText, "Oferta detectada y analizada")
         overlay.show(analysis)
     }
 
@@ -147,12 +157,24 @@ class UberAccessibilityService : AccessibilityService() {
         return values.joinToString("\n").take(MAX_RAW_TEXT_LENGTH)
     }
 
+    private fun recordDiagnostic(rawText: String, result: String) {
+        preferences.edit()
+            .putString(LAST_RAW_TEXT, rawText.take(DIAGNOSTIC_TEXT_LENGTH))
+            .putString(LAST_RESULT, result)
+            .putLong(LAST_EVENT_AT, System.currentTimeMillis())
+            .apply()
+    }
+
     companion object {
         const val PREFERENCES = "uber_capture_state"
         const val ACTIVE_OFFER_ID = "active_offer_id"
+        const val LAST_RAW_TEXT = "last_raw_text"
+        const val LAST_RESULT = "last_result"
+        const val LAST_EVENT_AT = "last_event_at"
         private const val MAX_TREE_DEPTH = 40
         private const val MAX_TEXT_NODES = 500
         private const val MAX_RAW_TEXT_LENGTH = 20_000
+        private const val DIAGNOSTIC_TEXT_LENGTH = 5_000
         private val UBER_PACKAGES = setOf("com.ubercab.driver")
     }
 }
