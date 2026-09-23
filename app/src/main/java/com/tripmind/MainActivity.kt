@@ -1,6 +1,9 @@
 package com.tripmind
 
+import android.content.ComponentName
+import android.content.Intent
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -14,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -24,6 +28,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -32,39 +37,49 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.tripmind.analyzer.cost.TripCostCalculator
+import com.tripmind.analyzer.Recommendation
+import com.tripmind.analyzer.TripAnalysis
+import com.tripmind.analyzer.TripAnalyzer
+import com.tripmind.core.model.Offer
 import com.tripmind.core.model.Trip
 import com.tripmind.core.model.VehicleProfile
 import com.tripmind.core.repository.TripRepository
+import com.tripmind.core.repository.VehicleProfileRepository
 import com.tripmind.history.importer.TripCandidate
 import com.tripmind.history.importer.UberScreenshotOcr
 import com.tripmind.history.parser.UberEarningsHistoryParser
+import com.tripmind.history.repository.OfferTripMatcher
+import com.tripmind.settings.DefaultVehicleProfile
+import com.tripmind.uber.accessibility.UberAccessibilityService
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val repository = (application as TripMindApplication).container.trips
-        setContent { MaterialTheme { TripMindScreen(repository) } }
+        val container = (application as TripMindApplication).container
+        setContent { MaterialTheme { TripMindScreen(container) } }
     }
 }
 
-private enum class Section { IMPORT, HISTORY, COSTS }
+private enum class Section { LIVE, IMPORT, HISTORY, COSTS }
 
 @Composable
-private fun TripMindScreen(repository: TripRepository) {
+private fun TripMindScreen(container: AppContainer) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val candidates = remember { mutableStateListOf<TripCandidate>() }
-    var section by remember { mutableStateOf(Section.IMPORT) }
+    var section by remember { mutableStateOf(Section.LIVE) }
     var processing by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
@@ -99,12 +114,17 @@ private fun TripMindScreen(repository: TripRepository) {
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text("TripMind", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                SectionButton("En vivo", section == Section.LIVE) { section = Section.LIVE }
                 SectionButton("Importar", section == Section.IMPORT) { section = Section.IMPORT }
                 SectionButton("Historial", section == Section.HISTORY) { section = Section.HISTORY }
                 SectionButton("Costos", section == Section.COSTS) { section = Section.COSTS }
             }
             when (section) {
+                Section.LIVE -> LiveSection(container)
                 Section.IMPORT -> ImportSection(
                         candidates = candidates,
                         processing = processing,
@@ -113,17 +133,22 @@ private fun TripMindScreen(repository: TripRepository) {
                         onDiscard = { candidates.remove(it) },
                         onSave = { candidate ->
                             scope.launch {
-                                runCatching { repository.create(candidate.toTrip()) }
+                                runCatching {
+                                    val trips = container.trips.observePage(limit = 100).first()
+                                    val linked = OfferTripMatcher.find(candidate, trips)
+                                    if (linked == null) container.trips.create(candidate.toTrip())
+                                    else container.trips.update(OfferTripMatcher.merge(linked, candidate))
+                                }
                                     .onSuccess {
                                         candidates.remove(candidate)
-                                        message = "Viaje guardado en el historial."
+                                        message = "Viaje guardado y asociado cuando se encontró una oferta compatible."
                                     }
                                     .onFailure { message = "No se pudo guardar: ${it.message ?: "error desconocido"}" }
                             }
                         },
                     )
-                Section.HISTORY -> HistorySection(repository)
-                Section.COSTS -> CostSection()
+                Section.HISTORY -> HistorySection(container.trips)
+                Section.COSTS -> CostSection(container.vehicles)
             }
         }
     }
@@ -217,23 +242,106 @@ private fun EditField(label: String, value: String, onChange: (String) -> Unit) 
 }
 
 @Composable
-private fun CostSection() {
+private fun LiveSection(container: AppContainer) {
+    val context = LocalContext.current
+    var settingsRefresh by remember { mutableStateOf(0) }
+    val settingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        settingsRefresh++
+    }
+    val offers by container.offers.observePage(limit = 25).collectAsState(initial = emptyList())
+    val profiles by container.vehicles.observePage(limit = 1).collectAsState(initial = emptyList())
+    val vehicle = profiles.firstOrNull() ?: DefaultVehicleProfile.create()
+    val enabled = remember(settingsRefresh) { isAccessibilityServiceEnabled(context) }
+
+    Column(
+        modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("Analizador en vivo", style = MaterialTheme.typography.headlineSmall)
+        Text(
+            if (enabled) "Accesibilidad: activa" else "Accesibilidad: desactivada",
+            color = if (enabled) Color(0xFF187844) else MaterialTheme.colorScheme.error,
+            fontWeight = FontWeight.Bold,
+        )
+        Text("TripMind solo lee el texto visible de Uber Driver. No pulsa Aceptar, Rechazar ni controla la aplicación.")
+        Button(onClick = {
+            settingsLauncher.launch(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }) { Text("Abrir ajustes de accesibilidad") }
+        Text("Configura tus costos y objetivos en la pestaña Costos antes de una jornada real.")
+        Text("Ofertas detectadas", style = MaterialTheme.typography.titleLarge)
+        if (offers.isEmpty()) Text("Aún no se han detectado ofertas. Abre Uber Driver después de activar el servicio.")
+        offers.forEach { offer -> OfferAnalysisCard(offer, TripAnalyzer().analyze(offer, vehicle)) }
+    }
+}
+
+@Composable
+private fun OfferAnalysisCard(offer: Offer, analysis: TripAnalysis) {
+    val (label, color) = when (analysis.recommendation) {
+        Recommendation.GREEN -> "🟢 CONVIENE" to Color(0xFF187844)
+        Recommendation.YELLOW -> "🟡 REVISAR" to Color(0xFF9A6A00)
+        Recommendation.RED -> "🔴 NO CONVIENE" to Color(0xFFAA2A2A)
+    }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(label, color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+            Text("Oferta: ${BigDecimal.valueOf(offer.offeredAmountMinor).toMxn()}")
+            Text("Bruto/h: ${analysis.grossPerHourMinor?.toMxn() ?: "pendiente"}")
+            Text("Bruto/km: ${analysis.grossPerKmMinor?.toMxn() ?: "pendiente"}")
+            Text("Neto: ${analysis.netEarningsMinor?.toMxn() ?: "pendiente"}")
+            Text("Neto/h: ${analysis.netPerHourMinor?.toMxn() ?: "pendiente"}")
+            Text("Neto/km: ${analysis.netPerKmMinor?.toMxn() ?: "pendiente"}")
+            Text("Estado: ${offer.status}")
+            Text(DATE_TIME.format(offer.detectedAt.atZone(ZoneId.systemDefault())))
+            analysis.reasons.forEach { Text("• $it") }
+        }
+    }
+}
+
+private fun isAccessibilityServiceEnabled(context: android.content.Context): Boolean {
+    val expected = ComponentName(context, UberAccessibilityService::class.java).flattenToString()
+    val enabled = Settings.Secure.getString(
+        context.contentResolver,
+        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+    ).orEmpty()
+    return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
+}
+
+@Composable
+private fun CostSection(repository: VehicleProfileRepository) {
+    val scope = rememberCoroutineScope()
+    val profiles by repository.observePage(limit = 1).collectAsState(initial = emptyList())
+    val savedProfile = profiles.firstOrNull()
     var gross by remember { mutableStateOf("90.00") }
     var distance by remember { mutableStateOf("9.0") }
     var fuelPrice by remember { mutableStateOf("24.00") }
     var efficiency by remember { mutableStateOf("12.0") }
     var maintenance by remember { mutableStateOf("0.50") }
     var depreciation by remember { mutableStateOf("0.30") }
+    var targetHourly by remember { mutableStateOf("120.00") }
+    var targetPerKm by remember { mutableStateOf("8.00") }
+    var saveMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(savedProfile?.id) {
+        savedProfile?.let {
+            fuelPrice = it.fuelPriceMinorPerLiter.movePointLeft(2).toPlainString()
+            efficiency = it.fuelEfficiencyKmPerLiter.toPlainString()
+            maintenance = it.maintenanceMinorPerKm.movePointLeft(2).toPlainString()
+            depreciation = it.depreciationMinorPerKm.movePointLeft(2).toPlainString()
+            targetHourly = BigDecimal.valueOf(it.targetNetHourlyMinor).movePointLeft(2).toPlainString()
+            targetPerKm = it.targetNetPerKmMinor.movePointLeft(2).toPlainString()
+        }
+    }
 
     val calculation = runCatching {
         val profile = VehicleProfile(
-            name = "Vista preliminar",
+            id = DefaultVehicleProfile.ID,
+            name = "Mi vehículo",
             fuelPriceMinorPerLiter = fuelPrice.requiredDecimal().movePointRight(2),
             fuelEfficiencyKmPerLiter = efficiency.requiredDecimal(),
             maintenanceMinorPerKm = maintenance.requiredDecimal().movePointRight(2),
             depreciationMinorPerKm = depreciation.requiredDecimal().movePointRight(2),
-            targetNetHourlyMinor = 0,
-            targetNetPerKmMinor = BigDecimal.ZERO,
+            targetNetHourlyMinor = targetHourly.requiredDecimal().movePointRight(2).longValueExact(),
+            targetNetPerKmMinor = targetPerKm.requiredDecimal().movePointRight(2),
         )
         val grossMinor = gross.requiredDecimal().movePointRight(2)
         require(grossMinor.signum() >= 0) { "Gross earnings cannot be negative" }
@@ -245,18 +353,30 @@ private fun CostSection() {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text("Calculadora de costos", style = MaterialTheme.typography.headlineSmall)
-        Text("Vista preliminar del motor económico. Estos valores todavía no se guardan como perfil del vehículo.")
+        Text("Guarda estos valores: serán los que use el análisis automático de ofertas.")
         EditField("Pago de la oferta (MXN)", gross) { gross = it }
         EditField("Distancia del viaje (km)", distance) { distance = it }
         EditField("Precio de gasolina (MXN/L)", fuelPrice) { fuelPrice = it }
         EditField("Rendimiento del vehículo (km/L)", efficiency) { efficiency = it }
         EditField("Mantenimiento (MXN/km)", maintenance) { maintenance = it }
         EditField("Depreciación (MXN/km)", depreciation) { depreciation = it }
+        EditField("Objetivo neto (MXN/h)", targetHourly) { targetHourly = it }
+        EditField("Objetivo neto (MXN/km)", targetPerKm) { targetPerKm = it }
 
         if (calculation == null) {
             Text("Revisa los valores: no pueden ser negativos y el rendimiento debe ser mayor que cero.", color = MaterialTheme.colorScheme.error)
         } else {
             val (costs, grossMinor) = calculation
+            val profile = VehicleProfile(
+                id = DefaultVehicleProfile.ID,
+                name = "Mi vehículo",
+                fuelPriceMinorPerLiter = fuelPrice.requiredDecimal().movePointRight(2),
+                fuelEfficiencyKmPerLiter = efficiency.requiredDecimal(),
+                maintenanceMinorPerKm = maintenance.requiredDecimal().movePointRight(2),
+                depreciationMinorPerKm = depreciation.requiredDecimal().movePointRight(2),
+                targetNetHourlyMinor = targetHourly.requiredDecimal().movePointRight(2).longValueExact(),
+                targetNetPerKmMinor = targetPerKm.requiredDecimal().movePointRight(2),
+            )
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Resultado", style = MaterialTheme.typography.titleLarge)
@@ -267,6 +387,15 @@ private fun CostSection() {
                     CostRow("Neto estimado", costs.netMinor(grossMinor), bold = true)
                 }
             }
+            Button(onClick = {
+                scope.launch {
+                    runCatching {
+                        if (repository.get(profile.id) == null) repository.create(profile) else repository.update(profile)
+                    }.onSuccess { saveMessage = "Perfil guardado. El análisis en vivo ya usa estos objetivos." }
+                        .onFailure { saveMessage = "No se pudo guardar el perfil." }
+                }
+            }) { Text("Guardar perfil del vehículo") }
+            saveMessage?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         }
     }
 }

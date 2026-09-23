@@ -14,6 +14,8 @@ interface Repository<T> {
 }
 
 interface OfferRepository : Repository<Offer>
-interface TripRepository : Repository<Trip>
+interface TripRepository : Repository<Trip> {
+    suspend fun getByOfferId(offerId: String): Trip?
+}
 interface DriverSessionRepository : Repository<DriverSession>
 interface VehicleProfileRepository : Repository<VehicleProfile>

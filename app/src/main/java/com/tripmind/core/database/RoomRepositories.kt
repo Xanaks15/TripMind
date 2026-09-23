@@ -19,6 +19,7 @@ class RoomOfferRepository(private val dao: OfferDao) : OfferRepository {
 class RoomTripRepository(private val dao: TripDao) : TripRepository {
     override suspend fun create(value: Trip) = dao.insert(TripEntity(value))
     override suspend fun get(id: String): Trip? = dao.get(id)?.value
+    override suspend fun getByOfferId(offerId: String): Trip? = dao.getByOfferId(offerId)?.value
     override fun observePage(limit: Int, offset: Int): Flow<List<Trip>> {
         require(limit in 1..500 && offset >= 0)
         return dao.observePage(limit, offset).map { rows -> rows.map { it.value } }

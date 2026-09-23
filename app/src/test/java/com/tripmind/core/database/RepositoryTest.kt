@@ -101,6 +101,7 @@ class RepositoryTest {
         repositories.trips.create(Trip(id = "trip", offerId = "offer"))
         repositories.offers.update(offer().copy(status = OfferStatus.ACCEPTED))
         assertEquals("offer", repositories.trips.get("trip")?.offerId)
+        assertEquals("trip", repositories.trips.getByOfferId("offer")?.id)
     }
 
     @Test fun duplicateInsertFailsWithoutOverwritingOriginal() = runTest {

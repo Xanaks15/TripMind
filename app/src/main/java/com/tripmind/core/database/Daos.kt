@@ -21,6 +21,7 @@ interface TripDao {
     @Insert suspend fun insert(entity: TripEntity)
     @Update suspend fun update(entity: TripEntity): Int
     @Query("SELECT * FROM trips WHERE id = :id") suspend fun get(id: String): TripEntity?
+    @Query("SELECT * FROM trips WHERE offerId = :offerId LIMIT 1") suspend fun getByOfferId(offerId: String): TripEntity?
     @Query("SELECT * FROM trips ORDER BY completedAt DESC, id ASC LIMIT :limit OFFSET :offset")
     fun observePage(limit: Int, offset: Int): Flow<List<TripEntity>>
     @Query("DELETE FROM trips WHERE id = :id") suspend fun delete(id: String): Int

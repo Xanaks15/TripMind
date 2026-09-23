@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">TripMind</string>
+    <string name="accessibility_service_label">TripMind — Analizador Uber</string>
+    <string name="accessibility_service_description">Analiza las ofertas visibles de Uber Driver y muestra una recomendación. No pulsa botones ni acepta viajes.</string>
+</resources>
