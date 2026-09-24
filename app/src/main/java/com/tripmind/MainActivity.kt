@@ -22,11 +22,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -72,7 +74,11 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Section { LIVE, IMPORT, HISTORY, COSTS }
+private enum class Section { LIVE, IMPORT, HISTORY, COSTS, PRIVACY }
+
+private const val CONSENT_PREFERENCES = "accessibility_consent"
+private const val CONSENT_VERSION_KEY = "accepted_disclosure_version"
+private const val CONSENT_VERSION = 1
 
 @Composable
 private fun TripMindScreen(container: AppContainer) {
@@ -90,19 +96,23 @@ private fun TripMindScreen(container: AppContainer) {
             val parser = UberEarningsHistoryParser()
             val ocr = UberScreenshotOcr()
             var failures = 0
+            var detectedTrips = 0
             try {
                 uris.forEach { uri ->
-                    runCatching { parser.parse(ocr.recognize(context, uri), uri.toString()) }
-                        .onSuccess(candidates::add)
+                    runCatching { parser.parseAll(ocr.recognize(context, uri), uri.toString()) }
+                        .onSuccess {
+                            candidates.addAll(it)
+                            detectedTrips += it.size
+                        }
                         .onFailure { failures++ }
                 }
             } finally {
                 ocr.close()
                 processing = false
                 message = if (failures == 0) {
-                    "${uris.size} captura(s) procesada(s). Revisa los datos antes de guardar."
+                    "$detectedTrips viaje(s) detectado(s) en ${uris.size} captura(s). Revisa los datos antes de guardar."
                 } else {
-                    "Se procesaron ${uris.size - failures}; $failures no pudieron leerse."
+                    "$detectedTrips viaje(s) detectado(s); $failures captura(s) no pudieron leerse."
                 }
             }
         }
@@ -122,6 +132,7 @@ private fun TripMindScreen(container: AppContainer) {
                 SectionButton("Importar", section == Section.IMPORT) { section = Section.IMPORT }
                 SectionButton("Historial", section == Section.HISTORY) { section = Section.HISTORY }
                 SectionButton("Costos", section == Section.COSTS) { section = Section.COSTS }
+                SectionButton("Privacidad", section == Section.PRIVACY) { section = Section.PRIVACY }
             }
             when (section) {
                 Section.LIVE -> LiveSection(container)
@@ -149,6 +160,7 @@ private fun TripMindScreen(container: AppContainer) {
                     )
                 Section.HISTORY -> HistorySection(container.trips)
                 Section.COSTS -> CostSection(container.vehicles)
+                Section.PRIVACY -> PrivacySection()
             }
         }
     }
@@ -246,6 +258,13 @@ private fun LiveSection(container: AppContainer) {
     val context = LocalContext.current
     var settingsRefresh by remember { mutableStateOf(0) }
     var diagnosticRefresh by remember { mutableStateOf(0) }
+    var showDisclosure by remember { mutableStateOf(false) }
+    var consentAccepted by remember {
+        mutableStateOf(
+            context.getSharedPreferences(CONSENT_PREFERENCES, android.content.Context.MODE_PRIVATE)
+                .getInt(CONSENT_VERSION_KEY, 0) == CONSENT_VERSION,
+        )
+    }
     val settingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         settingsRefresh++
     }
@@ -272,10 +291,14 @@ private fun LiveSection(container: AppContainer) {
             color = if (enabled) Color(0xFF187844) else MaterialTheme.colorScheme.error,
             fontWeight = FontWeight.Bold,
         )
-        Text("TripMind solo lee el texto visible de Uber Driver. No pulsa Aceptar, Rechazar ni controla la aplicación.")
+        Text("TripMind solo lee el texto visible de Uber Driver después de tu consentimiento. No pulsa Aceptar, Rechazar ni controla la aplicación.")
+        Text("Durante la jornada deja Uber Driver visible. TripMind funciona en segundo plano; no necesita quedarse abierto.")
         Button(onClick = {
-            settingsLauncher.launch(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-        }) { Text("Abrir ajustes de accesibilidad") }
+            if (consentAccepted) settingsLauncher.launch(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            else showDisclosure = true
+        }) { Text("Configurar accesibilidad") }
+        OutlinedButton(onClick = { showDisclosure = true }) { Text("Revisar uso de datos y consentimiento") }
+        Text(if (consentAccepted) "Consentimiento informado: aceptado" else "Consentimiento informado: pendiente")
         Text("Configura tus costos y objetivos en la pestaña Costos antes de una jornada real.")
         Text("Ofertas detectadas", style = MaterialTheme.typography.titleLarge)
         if (offers.isEmpty()) Text("Aún no se han detectado ofertas. Abre Uber Driver después de activar el servicio.")
@@ -290,6 +313,81 @@ private fun LiveSection(container: AppContainer) {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Text(raw.take(1_500), modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
             }
+        }
+    }
+
+    if (showDisclosure) {
+        AccessibilityDisclosureDialog(
+            onDecline = { showDisclosure = false },
+            onAccept = {
+                context.getSharedPreferences(CONSENT_PREFERENCES, android.content.Context.MODE_PRIVATE)
+                    .edit()
+                    .putInt(CONSENT_VERSION_KEY, CONSENT_VERSION)
+                    .apply()
+                consentAccepted = true
+                showDisclosure = false
+                settingsLauncher.launch(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            },
+        )
+    }
+}
+
+@Composable
+private fun AccessibilityDisclosureDialog(onDecline: () -> Unit, onAccept: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDecline,
+        title = { Text("Acceso a la pantalla de Uber") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("TripMind necesita el servicio de Accesibilidad para leer exclusivamente el texto visible dentro de Uber Driver mientras analizas ofertas.")
+                Text("Puede acceder a importes, tiempos, distancias, puntos de recogida, destinos y estados del viaje mostrados por Uber.")
+                Text("Usa esos datos para calcular pago por hora y kilómetro, mostrar una recomendación y relacionar una oferta con un viaje. El diagnóstico y el historial se guardan únicamente en este dispositivo.")
+                Text("TripMind no pulsa botones, no acepta ni rechaza viajes, y no envía ni comparte estos datos. Puedes revocar el acceso cuando quieras en Ajustes.")
+                Text("Si eliges No ahora, las funciones de costos, importación e historial siguen disponibles, pero no habrá detección automática.")
+            }
+        },
+        confirmButton = { TextButton(onClick = onAccept) { Text("Acepto y abrir ajustes") } },
+        dismissButton = { TextButton(onClick = onDecline) { Text("No ahora") } },
+    )
+}
+
+@Composable
+private fun PrivacySection() {
+    Column(
+        modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("Privacidad", style = MaterialTheme.typography.headlineSmall)
+        Text("TripMind funciona sin cuenta, anuncios, analítica ni servidor propio.")
+        PrivacyCard(
+            "Datos utilizados",
+            "Ofertas y estados visibles en Uber Driver; ganancias, tiempos, distancias, recogidas y destinos; capturas que selecciones; y los costos de tu vehículo.",
+        )
+        PrivacyCard(
+            "Finalidad",
+            "Calcular indicadores económicos, mostrar recomendaciones, importar viajes y mantener un historial que tú puedas consultar.",
+        )
+        PrivacyCard(
+            "Almacenamiento y transferencia",
+            "Los resultados, el texto de diagnóstico y el historial permanecen en la base privada de esta aplicación en tu teléfono. TripMind no los vende, comparte ni envía a un servidor.",
+        )
+        PrivacyCard(
+            "Tus controles",
+            "Puedes usar las funciones que no requieren Accesibilidad, revocar el servicio en Ajustes o borrar todos los datos desinstalando TripMind.",
+        )
+        Text("Vigente desde el 23 de septiembre de 2026. La política completa se publica junto al código fuente.")
+    }
+}
+
+@Composable
+private fun PrivacyCard(title: String, body: String) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(title, fontWeight = FontWeight.Bold)
+            Text(body)
         }
     }
 }
@@ -333,6 +431,7 @@ private fun CostSection(repository: VehicleProfileRepository) {
     val savedProfile = profiles.firstOrNull()
     var gross by remember { mutableStateOf("90.00") }
     var distance by remember { mutableStateOf("9.0") }
+    var durationMinutes by remember { mutableStateOf("30") }
     var fuelPrice by remember { mutableStateOf("24.00") }
     var efficiency by remember { mutableStateOf("12.0") }
     var maintenance by remember { mutableStateOf("0.50") }
@@ -352,8 +451,8 @@ private fun CostSection(repository: VehicleProfileRepository) {
         }
     }
 
-    val calculation = runCatching {
-        val profile = VehicleProfile(
+    val profile = runCatching {
+        VehicleProfile(
             id = DefaultVehicleProfile.ID,
             name = "Mi vehículo",
             fuelPriceMinorPerLiter = fuelPrice.requiredDecimal().movePointRight(2),
@@ -363,59 +462,112 @@ private fun CostSection(repository: VehicleProfileRepository) {
             targetNetHourlyMinor = targetHourly.requiredDecimal().movePointRight(2).longValueExact(),
             targetNetPerKmMinor = targetPerKm.requiredDecimal().movePointRight(2),
         )
+    }.getOrNull()
+
+    val simulation = runCatching {
+        val configuredProfile = requireNotNull(profile)
         val grossMinor = gross.requiredDecimal().movePointRight(2)
         require(grossMinor.signum() >= 0) { "Gross earnings cannot be negative" }
-        TripCostCalculator().calculate(distance.requiredDecimal(), profile) to grossMinor
+        val distanceKm = distance.requiredDecimal()
+        require(distanceKm.signum() > 0) { "Distance must be positive" }
+        val seconds = durationMinutes.requiredDecimal().multiply(BigDecimal.valueOf(60)).longValueExact()
+        require(seconds > 0) { "Duration must be positive" }
+        TripAnalyzer().analyze(
+            Offer(
+                detectedAt = java.time.Instant.now(),
+                offeredAmountMinor = grossMinor.setScale(0, RoundingMode.HALF_UP).longValueExact(),
+                estimatedDistanceKm = distanceKm,
+                estimatedDurationSeconds = seconds,
+            ),
+            configuredProfile,
+        )
     }.getOrNull()
+
+    val oneKmCosts = profile?.let { TripCostCalculator().calculate(BigDecimal.ONE, it) }
 
     Column(
         modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text("Calculadora de costos", style = MaterialTheme.typography.headlineSmall)
-        Text("Guarda estos valores: serán los que use el análisis automático de ofertas.")
-        EditField("Pago de la oferta (MXN)", gross) { gross = it }
-        EditField("Distancia del viaje (km)", distance) { distance = it }
-        EditField("Precio de gasolina (MXN/L)", fuelPrice) { fuelPrice = it }
-        EditField("Rendimiento del vehículo (km/L)", efficiency) { efficiency = it }
-        EditField("Mantenimiento (MXN/km)", maintenance) { maintenance = it }
-        EditField("Depreciación (MXN/km)", depreciation) { depreciation = it }
-        EditField("Objetivo neto (MXN/h)", targetHourly) { targetHourly = it }
-        EditField("Objetivo neto (MXN/km)", targetPerKm) { targetPerKm = it }
+        Text("Costos y metas", style = MaterialTheme.typography.headlineSmall)
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("¿Para qué sirve?", fontWeight = FontWeight.Bold)
+                Text("TripMind resta el desgaste estimado de tu vehículo al pago de cada oferta. Después compara lo que queda por hora y por kilómetro contra tus metas para decidir el color.")
+            }
+        }
 
-        if (calculation == null) {
-            Text("Revisa los valores: no pueden ser negativos y el rendimiento debe ser mayor que cero.", color = MaterialTheme.colorScheme.error)
-        } else {
-            val (costs, grossMinor) = calculation
-            val profile = VehicleProfile(
-                id = DefaultVehicleProfile.ID,
-                name = "Mi vehículo",
-                fuelPriceMinorPerLiter = fuelPrice.requiredDecimal().movePointRight(2),
-                fuelEfficiencyKmPerLiter = efficiency.requiredDecimal(),
-                maintenanceMinorPerKm = maintenance.requiredDecimal().movePointRight(2),
-                depreciationMinorPerKm = depreciation.requiredDecimal().movePointRight(2),
-                targetNetHourlyMinor = targetHourly.requiredDecimal().movePointRight(2).longValueExact(),
-                targetNetPerKmMinor = targetPerKm.requiredDecimal().movePointRight(2),
-            )
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Resultado", style = MaterialTheme.typography.titleLarge)
-                    CostRow("Combustible", costs.fuelCostMinor)
-                    CostRow("Mantenimiento", costs.maintenanceCostMinor)
-                    CostRow("Depreciación", costs.depreciationCostMinor)
-                    CostRow("Costo total", costs.totalCostMinor, bold = true)
-                    CostRow("Neto estimado", costs.netMinor(grossMinor), bold = true)
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("1. Costo de tu vehículo", style = MaterialTheme.typography.titleLarge)
+                Text("Usa valores aproximados; podrás corregirlos después.")
+                EditField("Precio de gasolina (MXN por litro)", fuelPrice) { fuelPrice = it }
+                EditField("Rendimiento real (km por litro)", efficiency) { efficiency = it }
+                EditField("Reserva de mantenimiento (MXN por km)", maintenance) { maintenance = it }
+                Text("Incluye aceite, llantas, frenos y servicios.", style = MaterialTheme.typography.bodySmall)
+                EditField("Depreciación del auto (MXN por km)", depreciation) { depreciation = it }
+                Text("Es la pérdida de valor causada por aumentar el kilometraje.", style = MaterialTheme.typography.bodySmall)
+                if (oneKmCosts != null) {
+                    CostRow("Costo estimado de recorrer 1 km", oneKmCosts.totalCostMinor, bold = true)
                 }
             }
-            Button(onClick = {
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("2. Tus metas mínimas", style = MaterialTheme.typography.titleLarge)
+                Text("Una oferta será verde sólo si, después de costos, cumple ambas metas.")
+                EditField("Quiero ganar neto al menos (MXN por hora)", targetHourly) { targetHourly = it }
+                EditField("Quiero ganar neto al menos (MXN por km)", targetPerKm) { targetPerKm = it }
+                Text("Verde: cumple ambas · Amarillo: cumple una · Rojo: no cumple ninguna.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
+        if (profile == null) {
+            Text("Revisa la configuración: no admite negativos y el rendimiento debe ser mayor que cero.", color = MaterialTheme.colorScheme.error)
+        }
+        Button(
+            enabled = profile != null,
+            onClick = {
                 scope.launch {
                     runCatching {
-                        if (repository.get(profile.id) == null) repository.create(profile) else repository.update(profile)
+                        val value = requireNotNull(profile)
+                        if (repository.get(value.id) == null) repository.create(value) else repository.update(value)
                     }.onSuccess { saveMessage = "Perfil guardado. El análisis en vivo ya usa estos objetivos." }
                         .onFailure { saveMessage = "No se pudo guardar el perfil." }
                 }
-            }) { Text("Guardar perfil del vehículo") }
-            saveMessage?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+            },
+        ) { Text("Guardar costos y metas") }
+        saveMessage?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("3. Prueba con una oferta", style = MaterialTheme.typography.titleLarge)
+                Text("Estos tres campos sólo son un ejemplo; no cambian tu configuración guardada.")
+                EditField("Pago mostrado por Uber (MXN)", gross) { gross = it }
+                EditField("Distancia mostrada por Uber (km)", distance) { distance = it }
+                EditField("Tiempo mostrado por Uber (minutos)", durationMinutes) { durationMinutes = it }
+                if (simulation == null) {
+                    Text("Introduce pago, distancia y tiempo válidos para ver el ejemplo.", color = MaterialTheme.colorScheme.error)
+                } else {
+                    val (label, color) = when (simulation.recommendation) {
+                        Recommendation.GREEN -> "🟢 CONVIENE" to Color(0xFF187844)
+                        Recommendation.YELLOW -> "🟡 REVISAR" to Color(0xFF9A6A00)
+                        Recommendation.RED -> "🔴 NO CONVIENE" to Color(0xFFAA2A2A)
+                    }
+                    Text(label, color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                    simulation.costs?.let { costs ->
+                        CostRow("Gasolina", costs.fuelCostMinor)
+                        CostRow("Mantenimiento", costs.maintenanceCostMinor)
+                        CostRow("Depreciación", costs.depreciationCostMinor)
+                        CostRow("Costos totales", costs.totalCostMinor, bold = true)
+                    }
+                    CostRow("Ganancia neta estimada", requireNotNull(simulation.netEarningsMinor), bold = true)
+                    CostRow("Neto por hora", requireNotNull(simulation.netPerHourMinor))
+                    CostRow("Neto por km", requireNotNull(simulation.netPerKmMinor))
+                    simulation.reasons.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                }
+            }
         }
     }
 }

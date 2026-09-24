@@ -44,17 +44,29 @@ class UberAccessibilityService : AccessibilityService() {
     private val container by lazy { (application as TripMindApplication).container }
     private val preferences by lazy { getSharedPreferences(PREFERENCES, MODE_PRIVATE) }
 
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        recordDiagnostic("", "Servicio activo; esperando una pantalla o notificación de Uber Driver")
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val packageName = event?.packageName?.toString() ?: return
         if (packageName !in UBER_PACKAGES) return
-        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
-            event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-        ) return
+        if (event.eventType !in OBSERVED_EVENT_TYPES) return
 
-        val root = rootInActiveWindow ?: return
-        val rawText = collectText(root)
-        if (rawText.isBlank()) return
-        recordDiagnostic(rawText, "Evento de Uber recibido")
+        val values = linkedSetOf<String>()
+        event.text.mapNotNullTo(values) { it?.toString()?.trim()?.takeIf(String::isNotEmpty) }
+        event.contentDescription?.toString()?.trim()?.takeIf(String::isNotEmpty)?.let(values::add)
+        (event.source ?: rootInActiveWindow)?.let { root ->
+            collectText(root).takeIf(String::isNotBlank)?.let(values::add)
+        }
+        val rawText = values.joinToString("\n").take(MAX_RAW_TEXT_LENGTH)
+        val eventName = AccessibilityEvent.eventTypeToString(event.eventType)
+        if (rawText.isBlank()) {
+            recordDiagnostic("", "Evento de Uber sin texto accesible: $eventName")
+            return
+        }
+        recordDiagnostic(rawText, "Evento de Uber recibido: $eventName")
         scope.launch { process(rawText) }
     }
 
@@ -176,6 +188,14 @@ class UberAccessibilityService : AccessibilityService() {
         private const val MAX_RAW_TEXT_LENGTH = 20_000
         private const val DIAGNOSTIC_TEXT_LENGTH = 5_000
         private val UBER_PACKAGES = setOf("com.ubercab.driver")
+        private val OBSERVED_EVENT_TYPES = setOf(
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED,
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
+            AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED,
+        )
     }
 }
 

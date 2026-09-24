@@ -10,17 +10,34 @@ import java.time.ZoneId
 
 class UberEarningsHistoryParser(private val zoneId: ZoneId = ZoneId.systemDefault()) {
     fun parse(rawText: String, sourceUri: String = "manual"): TripCandidate {
-        val lines = rawText.lines().map(String::trim).filter(String::isNotEmpty)
-        val earnings = lines.firstNotNullOfOrNull { line ->
-            if (line.contains(TIP_WORDS) || line.contains(CASH_WORDS)) null
-            else MONEY.find(line)?.groupValues?.get(1)?.toMinorUnits()
+        return parseAll(rawText, sourceUri).first()
+    }
+
+    /** A history screenshot can contain several trip cards. Each detail row closes one card. */
+    fun parseAll(rawText: String, sourceUri: String = "manual"): List<TripCandidate> {
+        val lines = rawText.normalizedLines()
+        val detailRows = lines.indices.filter { index -> lines[index].isTripDetailRow() }
+        if (detailRows.isEmpty()) return listOf(parseSegment(lines, rawText, sourceUri))
+        if (detailRows.size == 1) return listOf(parseSegment(lines, rawText, sourceUri))
+
+        var start = 0
+        return detailRows.mapIndexed { cardIndex, detailIndex ->
+            val segment = lines.subList(start, detailIndex + 1)
+            start = detailIndex + 1
+            parseSegment(segment, rawText, "$sourceUri#trip-${cardIndex + 1}")
         }
+    }
+
+    private fun parseSegment(lines: List<String>, screenshotText: String, sourceUri: String): TripCandidate {
+        val segmentText = lines.joinToString("\n")
+        val detailIndex = lines.indexOfLast { it.isTripDetailRow() }.takeIf { it >= 0 }
+        val earnings = findTripEarnings(lines, detailIndex)
         val tip = labeledMoney(lines, TIP_WORDS)
         val cash = labeledMoney(lines, CASH_WORDS)
-        val duration = DURATION.find(rawText)?.let(::durationSeconds)
-        val distance = DISTANCE.find(rawText)?.groupValues?.get(1)?.replace(',', '.')?.let(::BigDecimal)
-        val completedAt = parseCompletedAt(rawText)
-        val tripType = TYPE.find(rawText)?.value
+        val duration = DURATION.find(segmentText)?.let(::durationSeconds)
+        val distance = DISTANCE.find(segmentText)?.groupValues?.get(1)?.replace(',', '.')?.let(::BigDecimal)
+        val completedAt = parseCompletedAt(segmentText, screenshotText)
+        val tripType = TYPE.find(segmentText)?.value
         val pickupName = labeledValue(lines, PICKUP_LABELS)
         val pickupAddress = labeledValue(lines, ADDRESS_LABELS)
         val destination = labeledValue(lines, DESTINATION_LABELS)
@@ -41,7 +58,7 @@ class UberEarningsHistoryParser(private val zoneId: ZoneId = ZoneId.systemDefaul
 
         return TripCandidate(
             sourceUri = sourceUri,
-            rawText = rawText,
+            rawText = segmentText,
             completedAt = completedAt,
             earningsMinor = earnings,
             tipMinor = tip,
@@ -57,8 +74,26 @@ class UberEarningsHistoryParser(private val zoneId: ZoneId = ZoneId.systemDefaul
         )
     }
 
-    private fun labeledMoney(lines: List<String>, label: Regex): Long? =
-        lines.firstOrNull { it.contains(label) }?.let { MONEY.find(it)?.groupValues?.get(1)?.toMinorUnits() }
+    private fun findTripEarnings(lines: List<String>, detailIndex: Int?): Long? {
+        val indices = if (detailIndex == null) lines.indices.reversed() else (0..detailIndex).reversed()
+        return indices.firstNotNullOfOrNull { index ->
+            val line = lines[index]
+            val nearbyLabel = listOfNotNull(lines.getOrNull(index - 1), line, lines.getOrNull(index + 1))
+                .joinToString(" ")
+            if (nearbyLabel.contains(TIP_WORDS) || nearbyLabel.contains(CASH_WORDS)) null
+            else MONEY.find(line)?.groupValues?.get(1)?.toMinorUnits()
+        }
+    }
+
+    private fun labeledMoney(lines: List<String>, label: Regex): Long? {
+        lines.forEachIndexed { index, line ->
+            if (!line.contains(label)) return@forEachIndexed
+            listOfNotNull(line, lines.getOrNull(index - 1), lines.getOrNull(index + 1)).forEach { candidate ->
+                MONEY.find(candidate)?.groupValues?.get(1)?.toMinorUnits()?.let { return it }
+            }
+        }
+        return null
+    }
 
     private fun labeledValue(lines: List<String>, labels: Set<String>): String? {
         lines.forEachIndexed { index, line ->
@@ -70,9 +105,9 @@ class UberEarningsHistoryParser(private val zoneId: ZoneId = ZoneId.systemDefaul
         return null
     }
 
-    private fun parseCompletedAt(text: String) = runCatching {
-        val dateMatch = DATE.find(text) ?: return null
-        val timeMatch = TIME.find(text) ?: return null
+    private fun parseCompletedAt(segmentText: String, screenshotText: String) = runCatching {
+        val dateMatch = DATE.find(segmentText) ?: DATE.find(screenshotText) ?: return null
+        val timeMatch = TIME.find(segmentText) ?: return null
         val date = LocalDate.of(
             dateMatch.groupValues[3].toInt(), dateMatch.groupValues[2].toInt(), dateMatch.groupValues[1].toInt(),
         )
@@ -96,6 +131,13 @@ class UberEarningsHistoryParser(private val zoneId: ZoneId = ZoneId.systemDefaul
     }.getOrNull()
 
     private fun String.decimalValue(): BigDecimal = BigDecimal(replace(",", ""))
+
+    private fun String.normalizedLines(): List<String> =
+        lines().map(String::trim).filter(String::isNotEmpty)
+
+    private fun String.isTripDetailRow(): Boolean =
+        (contains(TYPE) && (contains(DURATION) || contains(DISTANCE))) ||
+            (contains(DURATION) && contains(DISTANCE))
 
     companion object {
         private val MONEY = Regex("\\$\\s*([0-9]+(?:,[0-9]{3})*(?:\\.[0-9]{1,2})?)")

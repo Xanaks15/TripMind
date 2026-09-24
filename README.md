@@ -22,6 +22,12 @@ neto por hora y kilómetro. La pestaña Costos permite guardar el perfil utiliza
 por el análisis en vivo. El servicio de accesibilidad y el overlay conectan ese
 análisis con las ofertas visibles de Uber Driver.
 
+Antes de abrir los ajustes de Accesibilidad, TripMind presenta una divulgación
+separada y solicita consentimiento afirmativo. La política de privacidad está
+disponible dentro de la aplicación y en [PRIVACY.md](PRIVACY.md). La preparación
+del canal de prueba se documenta en
+[publicación en Google Play](docs/publicacion-google-play.md).
+
 ## Compilación y pruebas
 
 Requisitos: JDK 17 y Android SDK 35. El wrapper descarga Gradle 8.11.1 y verifica
